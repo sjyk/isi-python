@@ -21,51 +21,104 @@ class ISIRecord(object):
         #internal store of the data
         self.processed_data = {}
 
+
+        #handles alternate format
+        if 'JointAngles' in self.data.dtype.names:
+            return self.__init_alternate__(raw)
+
+
         #iterate through all of the fields
         for index, attr in  enumerate(self.data.dtype.names):
             
             #bunch of special cases for processing
             if 'Pose_Base' in attr:
                 
-                pose_matrix = np.zeros((4,4))
-                pose_matrix[3,3] = 1
-                pose_matrix[0:3,3] = self.data[0][0][index].reshape((3,))
-
-                self.processed_data[attr] = pose_matrix
+                self.processed_data[attr] = self._3toPose(self.data[0][0][index])
 
             elif 'Pose_ECM' in attr or 'Pose_Workplace' in attr:
 
-                pose_matrix = np.zeros((4,4))
-                pose_matrix[3,3] = 1
-                pose_matrix[0:3,0:4] = self.data[0][0][index].reshape((3,4))
-
-                self.processed_data[attr] = pose_matrix
+                self.processed_data[attr] = self._12toPose(self.data[0][0][index])
 
             elif 'Pose_PSM' in attr:
 
                 for arm in range(3):
 
-                    pose_matrix = np.zeros((4,4))
-                    pose_matrix[3,3] = 1
-                    pose_matrix[0:3,0:4] = self.data[0][0][index][arm*12:(arm+1)*12].reshape((3,4))
-                    self.processed_data[attr+str((arm+1))] = pose_matrix
+                    self.processed_data[attr+str((arm+1))] = self._12toPose(self.data[0][0][index][arm*12:(arm+1)*12])
 
             elif 'Pose_RCM' in attr or 'Pose_Mount' in attr:
 
                 for arm in range(4):
 
-                    pose_matrix = np.zeros((4,4))
-                    pose_matrix[3,3] = 1
-                    pose_matrix[0:3,0:4] = self.data[0][0][index][arm*12:(arm+1)*12].reshape((3,4))
-
-                    if arm < 3:
-                        self.processed_data[attr+"_PSM"+str((arm+1))] = pose_matrix
+                    if arm > 0:
+                        self.processed_data[attr+"_PSM"+str((arm))] = self._12toPose(self.data[0][0][index][arm*12:(arm+1)*12])
                     else:
-                        self.processed_data[attr+"_ECM"] = pose_matrix
+                        self.processed_data[attr+"_ECM"] = self._12toPose(self.data[0][0][index][arm*12:(arm+1)*12])
 
 
             else:
                 self.processed_data[attr] = np.squeeze(self.data[0][0][index])
+
+
+    #some helper methods
+    def _3toPose(self, array):
+        pose_matrix = np.zeros((4,4))
+        pose_matrix[3,3] = 1
+        pose_matrix[0:3,3] = array.reshape((3,))
+        return pose_matrix
+
+    #some helper methods
+    def _12toPose(self, array):
+        pose_matrix = np.zeros((4,4))
+        pose_matrix[3,3] = 1
+        pose_matrix[0:3,0:4] = array.reshape((3,4))
+        return pose_matrix
+
+
+        """
+        populate the same data structure with the alternate format
+        """
+    def __init_alternate__(self, raw):
+        #seperates the header from the data
+        self.header, self.data = raw
+
+        #internal store of the data
+        self.processed_data = {}
+
+        pose_headers = ['Base', 'ECM', 'PSM', 'RCM', 'Mount', 'Workplace']
+        joint_headers = ['ECM', 'PSM1', 'PSM2', 'PSM3']
+
+        #iterate through all of the fields
+        for index, attr in  enumerate(self.data.dtype.names):
+
+            if attr == 'JointAngles':
+
+                for i, header in enumerate(joint_headers):
+                    self.processed_data['JointAngles_'+header] = np.squeeze(self.data[0][0][index][0][0][i])
+
+            elif attr == 'Pose':
+
+                for i, header in enumerate(pose_headers):
+
+                    if 'Base' in header:
+                        self.processed_data['Pose_'+header] = self._3toPose(self.data[0][0][index][0][0][i])
+                    elif 'ECM' in header or 'Workplace' in header:
+                        self.processed_data['Pose_'+header] = self._12toPose(self.data[0][0][index][0][0][i])
+                    elif 'PSM' in header:
+                        for arm in range(3):
+                            #print(self.data[0][0][index][0][0][i])
+                            self.processed_data['Pose_'+header+str(arm+1)] = self._12toPose(self.data[0][0][index][0][0][i][arm])
+                    elif 'RCM' in header:
+                        for arm in range(1,4):
+
+                            self.processed_data['Pose_'+header+"_PSM"+str(arm)] = self._12toPose(self.data[0][0][index][0][0][i][arm])
+
+                        self.processed_data['Pose_'+header+"_ECM"] = self._12toPose(self.data[0][0][index][0][0][i][0])
+
+            else:
+                self.processed_data[attr] = np.squeeze(self.data[0][0][index])
+
+
+        #print(self.processed_data)
 
     """
     Syntactic sugar to make the interface a little cleaner
